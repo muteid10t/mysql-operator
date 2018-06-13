@@ -82,6 +82,53 @@ var _ = Describe("Container crash", func() {
 		Expect(actual).To(Equal(expected))
 	})
 
+	It("should be the case that single-primary MySQL 5.7 Clusters recover from mysql-server containers crashing", func() {
+		clusterName := "mysql-server-crash"
+		ns := f.Namespace.Name
+
+		jig := framework.NewClusterTestJig(mcs, cs, clusterName)
+
+		cluster := jig.CreateAndAwaitClusterOrFail(ns, 3, func(cluster *v1alpha1.Cluster) {
+			cluster.Spec.Version = "5.7.22"
+		}, framework.DefaultTimeout)
+
+		primary := framework.GetReadyPrimaryPodName(cs, ns, cluster.Name)
+
+		expected, err := framework.WriteSQLTest(cluster, primary)
+		Expect(err).NotTo(HaveOccurred())
+
+		actual, err := framework.ReadSQLTest(cluster, primary)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actual).To(Equal(expected))
+
+		By("Terminating the primary mysql-server process")
+
+		_, err = framework.RunHostCmd(ns, primary, "mysql", "kill -9 1")
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking the Pod and MySQL cluster both become ready again")
+
+		framework.AwaitPodReadyOrDie(cs, ns, primary, framework.DefaultTimeout)
+		jig.WaitForClusterReadyOrFail(ns, cluster.Name, framework.DefaultTimeout)
+
+		secondary := framework.GetReadySecondaryPodName(cs, ns, cluster.Name)
+
+		By(fmt.Sprintf("Terminating mysql-server process of cluster secondary %q", secondary))
+
+		_, err = framework.RunHostCmd(ns, secondary, "mysql", "kill -9 1")
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking the Pod and MySQL cluster both become ready again")
+
+		framework.AwaitPodReadyOrDie(cs, ns, primary, framework.DefaultTimeout)
+		jig.WaitForClusterReadyOrFail(ns, cluster.Name, framework.DefaultTimeout)
+
+		By("Checking that we can still read the previously inserted data from the test DB")
+		actual, err = framework.ReadSQLTest(cluster, primary)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actual).To(Equal(expected))
+	})
+
 	It("should be the case that multi-primary Clusters recover from mysql-server containers crashing", func() {
 		clusterName := "mysql-server-crash"
 		ns := f.Namespace.Name

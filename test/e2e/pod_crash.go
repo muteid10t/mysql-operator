@@ -79,6 +79,49 @@ var _ = Describe("Pod crash", func() {
 		Expect(actual).To(Equal(expected))
 	})
 
+	It("should be the case that MySQL 5.7 single-primary Clusters recover from Pods crashing", func() {
+		clusterName := "pod-crash"
+		ns := f.Namespace.Name
+		grace := int64(0) // kill don't gracefully terminate
+
+		jig := framework.NewClusterTestJig(mcs, cs, clusterName)
+
+		cluster := jig.CreateAndAwaitClusterOrFail(ns, 3, func(cluster *v1alpha1.Cluster) {
+			cluster.Spec.Version = "5.7.22"
+		}, framework.DefaultTimeout)
+
+		primary := framework.GetReadyPrimaryPodName(cs, ns, cluster.Name)
+
+		expected, err := framework.WriteSQLTest(cluster, primary)
+		Expect(err).NotTo(HaveOccurred())
+
+		actual, err := framework.ReadSQLTest(cluster, primary)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actual).To(Equal(expected))
+
+		By("Terminating the cluster primary")
+
+		err = cs.CoreV1().Pods(ns).Delete(primary, &metav1.DeleteOptions{GracePeriodSeconds: &grace})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking that the primary has failed over to another member")
+
+		newPrimary := framework.GetReadyPrimaryPodName(cs, ns, cluster.Name)
+		Expect(newPrimary).NotTo(Equal(primary))
+
+		secondary := framework.GetReadySecondaryPodName(cs, ns, cluster.Name)
+
+		By(fmt.Sprintf("Terminating cluster secondary %q", secondary))
+
+		err = cs.CoreV1().Pods(ns).Delete(secondary, &metav1.DeleteOptions{GracePeriodSeconds: &grace})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking that we can still read the previously inserted data from the test DB")
+		actual, err = framework.ReadSQLTest(cluster, newPrimary)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actual).To(Equal(expected))
+	})
+
 	It("should be the case that multi-primary Clusters recover from Pods crashing", func() {
 		clusterName := "pod-crash"
 		ns := f.Namespace.Name

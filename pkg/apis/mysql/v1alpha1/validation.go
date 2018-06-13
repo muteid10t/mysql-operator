@@ -67,12 +67,8 @@ func validateClusterStatus(s ClusterStatus, fldPath *field.Path) field.ErrorList
 
 func validateVersion(version string, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
-	for _, validVersion := range validVersions {
-		if version == validVersion {
-			return allErrs
-		}
-	}
-	return append(allErrs, field.Invalid(fldPath, version, "invalid version specified"))
+	// TODO: Should we do any validation at all here?
+	return allErrs
 }
 
 func validateBaseServerID(baseServerID uint32, fldPath *field.Path) field.ErrorList {

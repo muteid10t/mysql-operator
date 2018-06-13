@@ -43,6 +43,24 @@ var _ = Describe("Cluster creation", func() {
 		Expect(actual).To(Equal(expected))
 	})
 
+	It("should be possible to create a MySQL 5.7 3 member cluster with a 28 character name", func() {
+		clusterName := "basic-twenty-eight-char-name"
+		Expect(clusterName).To(HaveLen(28))
+
+		jig := framework.NewClusterTestJig(f.MySQLClientSet, f.ClientSet, clusterName)
+
+		cluster := jig.CreateAndAwaitClusterOrFail(f.Namespace.Name, 3, func(cluster *v1alpha1.Cluster) {
+			cluster.Spec.Version = "5.7.22"
+		}, framework.DefaultTimeout)
+
+		expected, err := framework.WriteSQLTest(cluster, cluster.Name+"-0")
+		Expect(err).NotTo(HaveOccurred())
+
+		actual, err := framework.ReadSQLTest(cluster, cluster.Name+"-0")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actual).To(Equal(expected))
+	})
+
 	It("should be possible to create a multi-master cluster", func() {
 		clusterName := "multi-master"
 		members := int32(3)
