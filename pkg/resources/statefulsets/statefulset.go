@@ -172,7 +172,7 @@ func mysqlServerContainer(cluster *v1alpha1.Cluster, mysqlServerImage string, ro
 		"--datadir=/var/lib/mysql",
 		"--user=mysql",
 		"--gtid_mode=ON",
-		"--log-bin",
+		fmt.Sprintf("--log-bin=%s-${index}-bin", cluster.Name),
 		"--binlog_checksum=NONE",
 		"--enforce_gtid_consistency=ON",
 		"--log-slave-updates=ON",
