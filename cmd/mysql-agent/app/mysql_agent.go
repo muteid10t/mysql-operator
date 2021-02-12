@@ -30,15 +30,17 @@ import (
 
 	kubeinformers "k8s.io/client-go/informers"
 	kubernetes "k8s.io/client-go/kubernetes"
+	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
 
-	options "github.com/oracle/mysql-operator/cmd/mysql-agent/app/options"
 	cluster "github.com/oracle/mysql-operator/pkg/cluster"
 	backupcontroller "github.com/oracle/mysql-operator/pkg/controllers/backup"
 	clustermgr "github.com/oracle/mysql-operator/pkg/controllers/cluster/manager"
 	restorecontroller "github.com/oracle/mysql-operator/pkg/controllers/restore"
 	clientset "github.com/oracle/mysql-operator/pkg/generated/clientset/versioned"
+	opscheme "github.com/oracle/mysql-operator/pkg/generated/clientset/versioned/scheme"
 	informers "github.com/oracle/mysql-operator/pkg/generated/informers/externalversions"
+	agentopts "github.com/oracle/mysql-operator/pkg/options/agent"
 	metrics "github.com/oracle/mysql-operator/pkg/util/metrics"
 	signals "github.com/oracle/mysql-operator/pkg/util/signals"
 )
@@ -47,9 +49,13 @@ const (
 	metricsEndpoint = "0.0.0.0:8080"
 )
 
+func init() {
+	opscheme.AddToScheme(scheme.Scheme)
+}
+
 // resyncPeriod computes the time interval a shared informer waits before
 // resyncing with the api server.
-func resyncPeriod(opts *options.MySQLAgentOpts) func() time.Duration {
+func resyncPeriod(opts *agentopts.MySQLAgentOpts) func() time.Duration {
 	return func() time.Duration {
 		factor := rand.Float64() + 1
 		return time.Duration(float64(opts.MinResyncPeriod.Nanoseconds()) * factor)
@@ -57,7 +63,7 @@ func resyncPeriod(opts *options.MySQLAgentOpts) func() time.Duration {
 }
 
 // Run runs the MySQL backup controller. It should never exit.
-func Run(opts *options.MySQLAgentOpts) error {
+func Run(opts *agentopts.MySQLAgentOpts) error {
 	kubeconfig, err := rest.InClusterConfig()
 	if err != nil {
 		return err

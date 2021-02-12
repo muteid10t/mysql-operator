@@ -22,16 +22,19 @@ import (
 
 	apps "k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	agentopts "github.com/oracle/mysql-operator/cmd/mysql-agent/app/options"
-	operatoropts "github.com/oracle/mysql-operator/cmd/mysql-operator/app/options"
 	"github.com/oracle/mysql-operator/pkg/apis/mysql/v1alpha1"
 	"github.com/oracle/mysql-operator/pkg/constants"
+	agentopts "github.com/oracle/mysql-operator/pkg/options/agent"
+	operatoropts "github.com/oracle/mysql-operator/pkg/options/operator"
 	"github.com/oracle/mysql-operator/pkg/resources/secrets"
 	"github.com/oracle/mysql-operator/pkg/version"
+
+	"github.com/coreos/go-semver/semver"
 )
 
 const (
@@ -47,6 +50,8 @@ const (
 	mySQLSSLVolumeName    = "mysqlsslvolume"
 
 	replicationGroupPort = 13306
+
+	minMysqlVersionWithGroupExitStateArgs = "8.0.12"
 )
 
 func volumeMounts(cluster *v1alpha1.Cluster) []v1.VolumeMount {
@@ -146,13 +151,6 @@ func mysqlRootPassword(cluster *v1alpha1.Cluster) v1.EnvVar {
 	}
 }
 
-func serviceNameEnvVar(serviceName string) v1.EnvVar {
-	return v1.EnvVar{
-		Name:  "MYSQL_CLUSTER_SERVICE_NAME",
-		Value: serviceName,
-	}
-}
-
 func getReplicationGroupSeeds(name string, members int) string {
 	seeds := []string{}
 	for i := 0; i < members; i++ {
@@ -161,12 +159,30 @@ func getReplicationGroupSeeds(name string, members int) string {
 	return strings.Join(seeds, ",")
 }
 
+func checkSupportGroupExitStateArgs(deployingVersion string) (supportedVer bool) {
+	defer func() {
+		if r := recover(); r != nil {
+
+		}
+	}()
+
+	supportedVer = false
+
+	ver := semver.New(deployingVersion)
+	minVer := semver.New(minMysqlVersionWithGroupExitStateArgs)
+
+	if ver.LessThan(*minVer) {
+		return
+	}
+
+	supportedVer = true
+	return
+}
+
 // Builds the MySQL operator container for a cluster.
 // The 'mysqlImage' parameter is the image name of the mysql server to use with
 // no version information.. e.g. 'mysql/mysql-server'
-func mysqlServerContainer(cluster *v1alpha1.Cluster, mysqlServerImage string, rootPassword v1.EnvVar, serviceName string, members int, baseServerID uint32) v1.Container {
-	replicationGroupSeeds := getReplicationGroupSeeds(cluster.Namespace, members)
-
+func mysqlServerContainer(cluster *v1alpha1.Cluster, mysqlServerImage string, rootPassword v1.EnvVar, members int, baseServerID uint32) v1.Container {
 	args := []string{
 		"--server_id=$(expr $base + $index)",
 		"--datadir=/var/lib/mysql",
@@ -192,6 +208,10 @@ func mysqlServerContainer(cluster *v1alpha1.Cluster, mysqlServerImage string, ro
 			"--ssl-key=/etc/ssl/mysql/tls.key")
 	}
 
+	if checkSupportGroupExitStateArgs(cluster.Spec.Version) {
+		args = append(args, "--loose-group-replication-exit-state-action=READ_ONLY")
+	}
+
 	entryPointArgs := strings.Join(args, " ")
 
 	cmd := fmt.Sprintf(`
@@ -202,43 +222,50 @@ func mysqlServerContainer(cluster *v1alpha1.Cluster, mysqlServerImage string, ro
          # a unique server id for this instance.
          index=$(cat /etc/hostname | grep -o '[^-]*$')
          /entrypoint.sh %s`, baseServerID, entryPointArgs)
+
+	var resourceLimits corev1.ResourceRequirements
+	if cluster.Spec.Resources != nil && cluster.Spec.Resources.Server != nil {
+		resourceLimits = *cluster.Spec.Resources.Server
+	}
+
 	return v1.Container{
 		Name: MySQLServerName,
 		// TODO(apryde): Add BaseImage to cluster CRD.
 		Image: fmt.Sprintf("%s:%s", mysqlServerImage, cluster.Spec.Version),
 		Ports: []v1.ContainerPort{
-			v1.ContainerPort{
+			{
 				ContainerPort: 3306,
 			},
 		},
 		VolumeMounts: volumeMounts(cluster),
 		Command:      []string{"/bin/bash", "-ecx", cmd},
 		Env: []v1.EnvVar{
-			clusterNameEnvVar(cluster),
-			namespaceEnvVar(),
-			serviceNameEnvVar(serviceName),
-			replicationGroupSeedsEnvVar(replicationGroupSeeds),
-			multiMasterEnvVar(cluster.Spec.MultiMaster),
 			rootPassword,
-			v1.EnvVar{
+			{
 				Name:  "MYSQL_ROOT_HOST",
 				Value: "%",
 			},
-			v1.EnvVar{
+			{
 				Name:  "MYSQL_LOG_CONSOLE",
 				Value: "true",
 			},
 		},
+		Resources: resourceLimits,
 	}
 }
 
-func mysqlAgentContainer(cluster *v1alpha1.Cluster, mysqlAgentImage string, rootPassword v1.EnvVar, serviceName string, members int) v1.Container {
+func mysqlAgentContainer(cluster *v1alpha1.Cluster, mysqlAgentImage string, rootPassword v1.EnvVar, members int) v1.Container {
 	agentVersion := version.GetBuildVersion()
 	if version := os.Getenv("MYSQL_AGENT_VERSION"); version != "" {
 		agentVersion = version
 	}
 
 	replicationGroupSeeds := getReplicationGroupSeeds(cluster.Name, members)
+
+	var resourceLimits corev1.ResourceRequirements
+	if cluster.Spec.Resources != nil && cluster.Spec.Resources.Agent != nil {
+		resourceLimits = *cluster.Spec.Resources.Agent
+	}
 
 	return v1.Container{
 		Name:         MySQLAgentName,
@@ -248,11 +275,10 @@ func mysqlAgentContainer(cluster *v1alpha1.Cluster, mysqlAgentImage string, root
 		Env: []v1.EnvVar{
 			clusterNameEnvVar(cluster),
 			namespaceEnvVar(),
-			serviceNameEnvVar(serviceName),
 			replicationGroupSeedsEnvVar(replicationGroupSeeds),
 			multiMasterEnvVar(cluster.Spec.MultiMaster),
 			rootPassword,
-			v1.EnvVar{
+			{
 				Name: "MY_POD_IP",
 				ValueFrom: &v1.EnvVarSource{
 					FieldRef: &v1.ObjectFieldSelector{
@@ -277,6 +303,7 @@ func mysqlAgentContainer(cluster *v1alpha1.Cluster, mysqlAgentImage string, root
 				},
 			},
 		},
+		Resources: resourceLimits,
 	}
 }
 
@@ -318,21 +345,21 @@ func NewForCluster(cluster *v1alpha1.Cluster, images operatoropts.Images, servic
 			VolumeSource: v1.VolumeSource{
 				Projected: &v1.ProjectedVolumeSource{
 					Sources: []v1.VolumeProjection{
-						v1.VolumeProjection{
+						{
 							Secret: &v1.SecretProjection{
 								LocalObjectReference: v1.LocalObjectReference{
 									Name: cluster.Spec.SSLSecret.Name,
 								},
 								Items: []v1.KeyToPath{
-									v1.KeyToPath{
+									{
 										Key:  "ca.crt",
 										Path: "ca.crt",
 									},
-									v1.KeyToPath{
+									{
 										Key:  "tls.crt",
 										Path: "tls.crt",
 									},
-									v1.KeyToPath{
+									{
 										Key:  "tls.key",
 										Path: "tls.key",
 									},
@@ -346,8 +373,8 @@ func NewForCluster(cluster *v1alpha1.Cluster, images operatoropts.Images, servic
 	}
 
 	containers := []v1.Container{
-		mysqlServerContainer(cluster, images.MySQLServerImage, rootPassword, serviceName, members, baseServerID),
-		mysqlAgentContainer(cluster, images.MySQLAgentImage, rootPassword, serviceName, members)}
+		mysqlServerContainer(cluster, cluster.Spec.Repository, rootPassword, members, baseServerID),
+		mysqlAgentContainer(cluster, images.MySQLAgentImage, rootPassword, members)}
 
 	podLabels := map[string]string{
 		constants.ClusterLabel: cluster.Name,
@@ -393,15 +420,27 @@ func NewForCluster(cluster *v1alpha1.Cluster, images operatoropts.Images, servic
 					Volumes:            podVolumes,
 				},
 			},
+			UpdateStrategy: apps.StatefulSetUpdateStrategy{
+				Type: apps.RollingUpdateStatefulSetStrategyType,
+			},
 			ServiceName: serviceName,
 		},
 	}
 
+	if cluster.Spec.ImagePullSecrets != nil {
+		ss.Spec.Template.Spec.ImagePullSecrets = append(ss.Spec.Template.Spec.ImagePullSecrets, cluster.Spec.ImagePullSecrets...)
+	}
 	if cluster.Spec.VolumeClaimTemplate != nil {
 		ss.Spec.VolumeClaimTemplates = append(ss.Spec.VolumeClaimTemplates, *cluster.Spec.VolumeClaimTemplate)
 	}
 	if cluster.Spec.BackupVolumeClaimTemplate != nil {
 		ss.Spec.VolumeClaimTemplates = append(ss.Spec.VolumeClaimTemplates, *cluster.Spec.BackupVolumeClaimTemplate)
+	}
+	if cluster.Spec.SecurityContext != nil {
+		ss.Spec.Template.Spec.SecurityContext = cluster.Spec.SecurityContext
+	}
+	if cluster.Spec.Tolerations != nil {
+		ss.Spec.Template.Spec.Tolerations = *cluster.Spec.Tolerations
 	}
 	return ss
 }

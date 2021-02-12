@@ -1,8 +1,11 @@
 # MySQL Operator
 
-[![wercker status](https://app.wercker.com/status/cc1710e8b354d1a22f36b04c8313eac9/s/master "wercker status")](https://app.wercker.com/project/byKey/cc1710e8b354d1a22f36b04c8313eac9)
+The MySQL [Operator][1] creates, configures and manages MySQL InnoDB clusters running on Kubernetes. It is not for MySQL NDB Cluster.
 
-The MySQL [Operator][1] creates, configures and manages MySQL clusters running on Kubernetes.
+[![issues](https://img.shields.io/github/issues/oracle/mysql-operator.svg)](https://github.com/oracle/mysql-operator/issues)
+[![tags](https://img.shields.io/github/tag/oracle/mysql-operator.svg)](https://github.com/oracle/mysql-operator/tags)
+[![wercker status](https://app.wercker.com/status/cc1710e8b354d1a22f36b04c8313eac9/s/master "wercker status")](https://app.wercker.com/project/byKey/cc1710e8b354d1a22f36b04c8313eac9)
+[![Go Report Card](https://goreportcard.com/badge/github.com/oracle/mysql-operator)](https://goreportcard.com/report/github.com/oracle/mysql-operator)
 
 The MySQL Operator is opinionated about the way in which clusters are configured.
 We build upon [InnoDB cluster][3] and [Group Replication][4] to provide a complete high
@@ -20,7 +23,7 @@ See the [tutorial][5] which provides a quick-start guide for users of the Oracle
 
 The MySQL Operator provides the following core features:
 
-- Create and delete highly available MySQL clusters in Kubernetes with minimal effort
+- Create and delete highly available MySQL InnoDB clusters in Kubernetes with minimal effort
 - Automate database backups, failure detection, and recovery
 - Schedule automated backups as part of a cluster definition
 - Create "on-demand" backups.

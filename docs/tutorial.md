@@ -76,7 +76,7 @@ Parameter | Description | Default
 `rbac.enabled` | If true, enables RBAC | `true`
 `operator.namespace` | Controls the namespace in which the operator is deployed | `mysql-operator`
 `operator.global` | Controls whether the `mysql-operator` is installed in cluster-wide mode or in a single namespace | `true`
-`image.tag` | The version of the mysql-operator to install | `0.1.1`
+`image.tag` | The version of the mysql-operator to install | `0.2.0`
 
 ## Create a simple MySQL cluster
 
@@ -141,7 +141,7 @@ The first thing you need to do is fetch the MySQL root password which is
 auto-generated for us by default and stored in a Secret named `<dbname>-root-password`
 
 ```console
-$ kubectl -n my-namespace get secret my-app-db-root-password -o jsonpath="{.data.password}" | base64 -D
+$ kubectl -n my-namespace get secret my-app-db-root-password -o jsonpath="{.data.password}" | base64 --decode
 ETdmMKh2UuDq9m7y
 ```
 
